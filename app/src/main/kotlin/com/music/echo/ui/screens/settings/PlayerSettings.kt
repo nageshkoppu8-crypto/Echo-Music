@@ -1,5 +1,10 @@
 package echo.music.iad1tya.ui.screens.settings
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -52,6 +57,7 @@ import echo.music.iad1tya.constants.DownloadWithMetadataKey
 import echo.music.iad1tya.constants.EnableBitPerfectUsbDacKey
 import echo.music.iad1tya.constants.EnableExportAsMp3Key
 import echo.music.iad1tya.constants.EnableGoogleCastKey
+import echo.music.iad1tya.constants.FloatingPlayerEnabledKey
 import echo.music.iad1tya.constants.UsbDacVolumeModeKey
 import echo.music.iad1tya.constants.HistoryDuration
 import echo.music.iad1tya.constants.KeepScreenOn
@@ -115,6 +121,8 @@ fun PlayerSettings(
     rememberPreference(CrossfadeGaplessKey, defaultValue = true)
   val (persistentQueue, onPersistentQueueChange) =
     rememberPreference(PersistentQueueKey, defaultValue = true)
+  val (floatingPlayerEnabled, onFloatingPlayerEnabledChange) =
+    rememberPreference(FloatingPlayerEnabledKey, defaultValue = false)
   val (skipSilence, onSkipSilenceChange) = rememberPreference(SkipSilenceKey, defaultValue = false)
   val (skipSilenceInstant, onSkipSilenceInstantChange) =
     rememberPreference(SkipSilenceInstantKey, defaultValue = false)
@@ -156,6 +164,24 @@ fun PlayerSettings(
     rememberPreference(key = EnableExportAsMp3Key, defaultValue = false)
 
   val context = androidx.compose.ui.platform.LocalContext.current
+  val floatingPlayerPermissionLauncher =
+    rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+      onFloatingPlayerEnabledChange(Settings.canDrawOverlays(context))
+    }
+  val onFloatingPlayerToggle: (Boolean) -> Unit = { enabled ->
+    if (!enabled) {
+      onFloatingPlayerEnabledChange(false)
+    } else if (Settings.canDrawOverlays(context)) {
+      onFloatingPlayerEnabledChange(true)
+    } else {
+      floatingPlayerPermissionLauncher.launch(
+        Intent(
+          Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+          Uri.parse("package:${context.packageName}")
+        )
+      )
+    }
+  }
 
   val (enableGoogleCast, onEnableGoogleCastChange) =
     rememberPreference(key = EnableGoogleCastKey, defaultValue = true)
@@ -1076,6 +1102,29 @@ fun PlayerSettings(
       title = stringResource(R.string.queue),
       items =
         listOf(
+          Material3SettingsItem(
+            isHighlighted = (highlightKey == stringResource(R.string.floating_player)),
+            icon = painterResource(R.drawable.playlist_play),
+            title = { Text(stringResource(R.string.floating_player)) },
+            description = { Text(stringResource(R.string.floating_player_desc)) },
+            trailingContent = {
+              Switch(
+                checked = floatingPlayerEnabled,
+                onCheckedChange = onFloatingPlayerToggle,
+                thumbContent = {
+                  Icon(
+                    painter =
+                      painterResource(
+                        id = if (floatingPlayerEnabled) R.drawable.check else R.drawable.close
+                      ),
+                    contentDescription = null,
+                    modifier = Modifier.size(SwitchDefaults.IconSize)
+                  )
+                }
+              )
+            },
+            onClick = { onFloatingPlayerToggle(!floatingPlayerEnabled) }
+          ),
           Material3SettingsItem(
             isHighlighted = (highlightKey == stringResource(R.string.persistent_queue)),
             icon = painterResource(R.drawable.queue_music),

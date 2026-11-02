@@ -369,3 +369,9 @@ Optional full-screen vertical swipe discovery (`echo.music.iad1tya.musicflow`, r
 ## Ambient Mode Canvas
 
 Ambient Mode keeps the existing album-art square and layers muted Canvas artwork inside that same clipped square. The normal album art remains underneath as the fallback; Canvas follows playback state and is non-interactive.
+
+## Floating Player
+
+The optional Android application-overlay player is owned by `MusicService` and always controls its active Media3 `Player`; do not add another player or service. `FloatingPlayerEnabledKey` is a DataStore preference managed in Player settings. The overlay appears only while the app process is backgrounded, playback is active, and `Settings.canDrawOverlays` is true. The permission is requested only from the user's enable action; denial leaves normal MediaSession and notification playback intact.
+
+`FloatingPlayerOverlay` is a compact, dark, pill-shaped WindowManager view. It reads status-bar and display-cutout insets, places itself centered under system UI by default, and supports long-press dragging. Its collapsed metadata row uses track artwork and a low-cost animated waveform; the expanded row provides labeled previous/play-pause/next buttons. Tap, double-tap, and horizontal swipes are additional controls. Remove the window when the preference is disabled, playback stops, the app returns to foreground, permission is revoked, or the service is destroyed. Keep docs for this distinct overlay visual pattern in `DESIGN.md`.

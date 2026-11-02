@@ -99,6 +99,7 @@ Echo Music delivers a seamless, premium listening experience by leveraging YouTu
 - **Data Saver Mode** — Reduce data consumption when streaming on cellular networks.
 - **Seamless Playback** — Switch effortlessly between audio-only and video modes.
 - **Background Playback** — Listen while using other apps or with the screen off.
+- **Floating Player** — Optionally keep a compact, gesture-enabled player above other apps while music is playing.
 - **Offline Mode** — Download tracks, albums, and playlists via a dedicated download manager.
 - **Crossfade** — Smooth transitions between tracks.
 - **Canvas Animations** — Visual animations while playing music.
@@ -198,6 +199,7 @@ Visit the official repository to get started:
 ### Android Installation
 
 Download the latest pre-compiled APK from the [Releases Page](https://github.com/EchoMusicApp/Echo-Music/releases/latest).
+The [Floating Player preview APK](https://github.com/EchoMusicApp/Echo-Music/releases/download/floating-player-preview/Echo-Music-Universal-GMS.apk) is an installable debug build. Floating Player is optional in **Settings → Player** and requires Android's **Display over other apps** permission.
 
 <details>
 <summary><b>Building from Source</b></summary>

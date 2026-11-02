@@ -84,6 +84,7 @@ val VarispeedKey = booleanPreferencesKey("varispeed")
 val PauseOnMute = booleanPreferencesKey("pauseOnMute")
 val ResumeOnBluetoothConnectKey = booleanPreferencesKey("resumeOnBluetoothConnect")
 val AutoplayOnAutomotiveConnectKey = booleanPreferencesKey("autoplayOnAutomotiveConnect")
+val FloatingPlayerEnabledKey = booleanPreferencesKey("floatingPlayerEnabled")
 val KeepScreenOn = booleanPreferencesKey("keepScreenOn")
 val DeveloperModeKey = booleanPreferencesKey("developerMode")
 

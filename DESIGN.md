@@ -103,3 +103,7 @@ Vertical swipe discovery, laid out like a Resso-style "For You" page (interactio
 ## Ambient Mode Canvas
 
 Ambient Mode may layer muted Canvas video artwork inside the existing album-art square. Keep the original square size, rounded clipping, and interaction surface unchanged; Canvas is a non-interactive visual layer above the normal album art and follows playback state. The existing glow background remains separate underneath the screen.
+
+## Floating Player Overlay
+
+The optional player is a compact, dark pill centered below system UI and the display cutout. Track artwork and a subtle animated waveform sit beside the title and artist; expanding reveals 48dp playback controls. Use the existing Nothing-style high-contrast palette and keep both states compact on small displays.

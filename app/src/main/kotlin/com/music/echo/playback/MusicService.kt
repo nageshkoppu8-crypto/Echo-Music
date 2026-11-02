@@ -11,6 +11,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.database.SQLException
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
@@ -24,6 +25,9 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.content.getSystemService
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.datastore.preferences.core.edit
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -92,6 +96,7 @@ import echo.music.iad1tya.constants.DiscordTokenKey
 import echo.music.iad1tya.constants.EnableBitPerfectUsbDacKey
 import echo.music.iad1tya.constants.EnableDiscordRPCKey
 import echo.music.iad1tya.constants.EnableLastFMScrobblingKey
+import echo.music.iad1tya.constants.FloatingPlayerEnabledKey
 import echo.music.iad1tya.constants.ForceOpusKey
 import echo.music.iad1tya.constants.HideExplicitKey
 import echo.music.iad1tya.constants.HideVideoSongsKey
@@ -384,6 +389,17 @@ class MusicService : MediaLibraryService(), Player.Listener, PlaybackStatsListen
     }
 
   private var scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+  private var floatingPlayerEnabled = false
+  private var appInForeground =
+    ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+  private var floatingPlayerOverlay: FloatingPlayerOverlay? = null
+  private val floatingPlayerLifecycleObserver =
+    LifecycleEventObserver { _, event ->
+      if (event == Lifecycle.Event.ON_START || event == Lifecycle.Event.ON_STOP) {
+        appInForeground = event == Lifecycle.Event.ON_START
+        updateFloatingPlayer()
+      }
+    }
 
   private val binder = MusicBinder()
 
@@ -635,6 +651,17 @@ class MusicService : MediaLibraryService(), Player.Listener, PlaybackStatsListen
   override fun onCreate() {
     super.onCreate()
     isRunning = true
+    ProcessLifecycleOwner.get().lifecycle.addObserver(floatingPlayerLifecycleObserver)
+
+    scope.launch {
+      dataStore.data
+        .map { preferences -> preferences[FloatingPlayerEnabledKey] ?: false }
+        .distinctUntilChanged()
+        .collect {
+          floatingPlayerEnabled = it
+          updateFloatingPlayer()
+        }
+    }
 
     // Workaround for ForegroundServiceStartNotAllowedException
     setListener(
@@ -3046,6 +3073,18 @@ class MusicService : MediaLibraryService(), Player.Listener, PlaybackStatsListen
         }
       }
     }
+
+    updateFloatingPlayer()
+  }
+
+  private fun updateFloatingPlayer() {
+    if (!::player.isInitialized) return
+    if (floatingPlayerEnabled && !appInForeground && player.isPlaying) {
+      if (floatingPlayerOverlay == null) floatingPlayerOverlay = FloatingPlayerOverlay(this)
+      floatingPlayerOverlay?.show(player)
+    } else {
+      floatingPlayerOverlay?.hide()
+    }
   }
 
   override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -4354,6 +4393,9 @@ class MusicService : MediaLibraryService(), Player.Listener, PlaybackStatsListen
 
   override fun onDestroy() {
     isRunning = false
+    ProcessLifecycleOwner.get().lifecycle.removeObserver(floatingPlayerLifecycleObserver)
+    floatingPlayerOverlay?.hide()
+    floatingPlayerOverlay = null
     crossfadeTriggerJob?.cancel()
     crossfadeJob?.cancel()
     releasePrebuffered()
@@ -4394,6 +4436,13 @@ class MusicService : MediaLibraryService(), Player.Listener, PlaybackStatsListen
     discordUpdateJob?.cancel()
     scope.cancel()
     super.onDestroy()
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    floatingPlayerOverlay?.hide()
+    floatingPlayerOverlay = null
+    updateFloatingPlayer()
   }
 
   override fun onBind(intent: Intent?) = super.onBind(intent) ?: binder
