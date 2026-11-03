@@ -55,6 +55,8 @@ internal class FloatingPlayerOverlay(private val context: Context) {
   private var container: LinearLayout? = null
   private var expandedContent: LinearLayout? = null
   private var controlsRow: LinearLayout? = null
+  private var metadataRow: LinearLayout? = null
+  private var metadataColumn: LinearLayout? = null
   private var titleView: TextView? = null
   private var artistView: TextView? = null
   private var artworkView: ImageView? = null
@@ -65,7 +67,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
   private var loadedArtworkUri: Uri? = null
   private var artworkRequest: Disposable? = null
   private var currentPlayer: Player? = null
-  private var expanded = false
+  private var presentationState = PresentationState.CAPSULE
   private var attached = false
   private var statusInset = 0
   private var cutoutLeftInset = 0
@@ -78,7 +80,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
   private val progressUpdater =
     object : Runnable {
       override fun run() {
-        if (!attached || !expanded) return
+        if (!attached || presentationState != PresentationState.CARD) return
         updateProgress()
         container?.postDelayed(this, PROGRESS_UPDATE_INTERVAL_MS)
       }
@@ -86,7 +88,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
 
   init {
     params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-    params.width = widthForState(expanded = false)
+    params.width = widthForState(PresentationState.CAPSULE)
   }
 
   fun show(player: Player) {
@@ -119,11 +121,11 @@ internal class FloatingPlayerOverlay(private val context: Context) {
 
   fun hide() {
     currentPlayer = null
-    expanded = false
+    presentationState = PresentationState.CAPSULE
     expansionAnimator?.cancel()
     expansionAnimator = null
     container?.removeCallbacks(progressUpdater)
-    params.width = widthForState(expanded = false)
+    params.width = widthForState(PresentationState.CAPSULE)
     if (attached) {
       try {
         container?.let(windowManager::removeView)
@@ -162,7 +164,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
         isClickable = true
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         contentDescription = context.getString(R.string.floating_player_expand)
-        setOnClickListener { setExpanded(!expanded) }
+        setOnClickListener { advancePresentationState() }
       }
     val artwork =
       ImageView(context).apply {
@@ -184,6 +186,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(9), 0, dp(4), 0)
+        alpha = 0f
       }
     val title =
       TextView(context).apply {
@@ -374,7 +377,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
         cutoutRightInset = 0
       }
       statusInset = max(statusBarTop, cutoutTop)
-      params.width = widthForState(expanded)
+      params.width = widthForState(presentationState)
       updateWindowPosition()
       insets
     }
@@ -382,6 +385,8 @@ internal class FloatingPlayerOverlay(private val context: Context) {
     container = card
     expandedContent = details
     controlsRow = controls
+    metadataRow = metadata
+    metadataColumn = textColumn
     titleView = title
     artistView = artist
     artworkView = artwork
@@ -401,13 +406,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
         ?: context.getString(R.string.unknown_artist)
     titleView?.text = title
     artistView?.text = artist
-    container?.getChildAt(0)?.contentDescription =
-      context.getString(
-        if (expanded) R.string.floating_player_tap_to_collapse
-        else R.string.floating_player_tap_to_expand,
-        title,
-        artist
-      )
+    metadataRow?.contentDescription = stateDescription(presentationState)
     waveformView?.isPlaying = player.isPlaying
 
     val artworkUri = metadata.artworkUri
@@ -438,7 +437,9 @@ internal class FloatingPlayerOverlay(private val context: Context) {
   private fun updateProgress() {
     val player = currentPlayer ?: return
     val duration = player.duration.takeIf { it > 0L && it != androidx.media3.common.C.TIME_UNSET } ?: 0L
-    val position = player.currentPosition.coerceIn(0L, duration)
+    val position =
+      if (duration > 0L) player.currentPosition.coerceIn(0L, duration)
+      else player.currentPosition.coerceAtLeast(0L)
     elapsedView?.text = formatTime(position)
     durationView?.text = formatTime(duration)
     elapsedView?.contentDescription =
@@ -478,9 +479,19 @@ internal class FloatingPlayerOverlay(private val context: Context) {
       setOnClickListener { onClick() }
     }
 
-  private fun setExpanded(value: Boolean) {
-    if (expanded == value || container == null) return
-    expanded = value
+  private fun advancePresentationState() {
+    val nextState =
+      when (presentationState) {
+        PresentationState.CAPSULE -> PresentationState.PILL
+        PresentationState.PILL -> PresentationState.CARD
+        PresentationState.CARD -> PresentationState.CAPSULE
+      }
+    setPresentationState(nextState)
+  }
+
+  private fun setPresentationState(targetState: PresentationState) {
+    if (presentationState == targetState || container == null) return
+    presentationState = targetState
     expansionAnimator?.cancel()
 
     val details = expandedContent ?: return
@@ -491,27 +502,22 @@ internal class FloatingPlayerOverlay(private val context: Context) {
         details.layoutParams.height >= 0 -> details.layoutParams.height
         else -> dp(EXPANDED_CONTENT_HEIGHT_DP)
       }
-    val targetHeight = if (value) dp(EXPANDED_CONTENT_HEIGHT_DP) else 0
+    val targetHeight =
+      if (targetState == PresentationState.CARD) expandedContentHeight() else 0
     val startWidth = params.width
-    val targetWidth = widthForState(value)
-    if (value) {
+    val targetWidth = widthForState(targetState)
+    val startTextAlpha = metadataColumn?.alpha ?: 0f
+    val targetTextAlpha =
+      if (targetState == PresentationState.CAPSULE) 0f else 1f
+    if (targetState == PresentationState.CARD) {
       details.visibility = View.VISIBLE
       details.layoutParams = details.layoutParams.apply { height = currentHeight }
-      container?.getChildAt(0)?.contentDescription =
-        context.getString(
-          R.string.floating_player_tap_to_collapse,
-          titleView?.text ?: context.getString(R.string.unknown_track),
-          artistView?.text ?: context.getString(R.string.unknown_artist)
-        )
+    }
+    metadataRow?.contentDescription = stateDescription(targetState)
+    if (targetState == PresentationState.CARD) {
       container?.post(progressUpdater)
     } else {
       container?.removeCallbacks(progressUpdater)
-      container?.getChildAt(0)?.contentDescription =
-        context.getString(
-          R.string.floating_player_tap_to_expand,
-          titleView?.text ?: context.getString(R.string.unknown_track),
-          artistView?.text ?: context.getString(R.string.unknown_artist)
-        )
     }
 
     var cancelled = false
@@ -530,10 +536,15 @@ internal class FloatingPlayerOverlay(private val context: Context) {
               height =
                 (currentHeight + (targetHeight - currentHeight) * fraction)
                   .toInt()
-                  .coerceIn(0, targetHeight + dp(4))
+                  .coerceIn(0, max(currentHeight, targetHeight) + dp(4))
             }
-          details.alpha = fraction.coerceIn(0f, 1f)
-          details.translationY = dp(5) * (1f - fraction.coerceIn(0f, 1f))
+          val linearFraction = fraction.coerceIn(0f, 1f)
+          details.alpha =
+            if (targetState == PresentationState.CARD) linearFraction
+            else 1f - linearFraction
+          details.translationY = dp(5) * (1f - linearFraction)
+          metadataColumn?.alpha =
+            startTextAlpha + (targetTextAlpha - startTextAlpha) * linearFraction
           updateWindowPosition()
         }
         addListener(
@@ -547,9 +558,13 @@ internal class FloatingPlayerOverlay(private val context: Context) {
               details.layoutParams =
                 details.layoutParams.apply {
                   height =
-                    if (value) LinearLayout.LayoutParams.WRAP_CONTENT else 0
+                    if (targetState == PresentationState.CARD) {
+                      LinearLayout.LayoutParams.WRAP_CONTENT
+                    } else {
+                      0
+                    }
                 }
-              if (!value) {
+              if (targetState != PresentationState.CARD) {
                 details.visibility = View.GONE
                 details.alpha = 0f
                 details.translationY = dp(5).toFloat()
@@ -558,6 +573,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
                 details.translationY = 0f
                 updateProgress()
               }
+              metadataColumn?.alpha = targetTextAlpha
               expansionAnimator = null
               updateWindowPosition()
             }
@@ -567,9 +583,37 @@ internal class FloatingPlayerOverlay(private val context: Context) {
       }
   }
 
-  private fun widthForState(expanded: Boolean): Int {
+  private fun stateDescription(state: PresentationState): CharSequence {
+    val title = titleView?.text ?: context.getString(R.string.unknown_track)
+    val artist = artistView?.text ?: context.getString(R.string.unknown_artist)
+    val description =
+      when (state) {
+        PresentationState.CAPSULE -> R.string.floating_player_tap_to_expand
+        PresentationState.PILL -> R.string.floating_player_tap_to_open_controls
+        PresentationState.CARD -> R.string.floating_player_tap_to_collapse
+      }
+    return context.getString(description, title, artist)
+  }
+
+  private fun expandedContentHeight(): Int {
+    val availableHeight =
+      (context.resources.displayMetrics.heightPixels -
+        statusInset -
+        dp(SCREEN_SIDE_MARGIN_DP * 2) -
+        dp(COLLAPSED_ROW_HEIGHT_DP + ROOT_VERTICAL_PADDING_DP))
+        .coerceAtLeast(dp(MIN_EXPANDED_CONTENT_HEIGHT_DP))
+    return min(dp(EXPANDED_CONTENT_HEIGHT_DP), availableHeight)
+  }
+
+  private fun widthForState(state: PresentationState): Int {
     val maxWidth = availableWidth()
-    return min(dp(if (expanded) EXPANDED_MAX_WIDTH_DP else COLLAPSED_MAX_WIDTH_DP), maxWidth)
+    val width =
+      when (state) {
+        PresentationState.CAPSULE -> CAPSULE_WIDTH_DP
+        PresentationState.PILL -> PILL_WIDTH_DP
+        PresentationState.CARD -> EXPANDED_MAX_WIDTH_DP
+      }
+    return min(dp(width), maxWidth)
       .coerceAtLeast(dp(1))
   }
 
@@ -623,6 +667,12 @@ internal class FloatingPlayerOverlay(private val context: Context) {
     durationView = null
     progressView = null
     loadedArtworkUri = null
+  }
+
+  private enum class PresentationState {
+    CAPSULE,
+    PILL,
+    CARD
   }
 
   private fun dp(value: Int): Int = (value * density).toInt()
@@ -711,12 +761,15 @@ internal class FloatingPlayerOverlay(private val context: Context) {
   }
 
   private companion object {
-    const val COLLAPSED_MAX_WIDTH_DP = 252
+    const val CAPSULE_WIDTH_DP = 96
+    const val PILL_WIDTH_DP = 284
     const val COLLAPSED_ROW_HEIGHT_DP = 40
     const val EXPANDED_MAX_WIDTH_DP = 420
     const val EXPANDED_CONTENT_HEIGHT_DP = 77
+    const val MIN_EXPANDED_CONTENT_HEIGHT_DP = 75
     const val EXPANDED_CONTROLS_HEIGHT_DP = 48
     const val SCREEN_SIDE_MARGIN_DP = 16
+    const val ROOT_VERTICAL_PADDING_DP = 12
     const val EXPANSION_DURATION_MS = 360L
     const val PROGRESS_UPDATE_INTERVAL_MS = 500L
 
