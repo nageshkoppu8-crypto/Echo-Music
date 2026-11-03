@@ -106,4 +106,6 @@ Ambient Mode may layer muted Canvas video artwork inside the existing album-art 
 
 ## Floating Player Overlay
 
-The optional player is a compact, dark pill centered below system UI and the display cutout. Track artwork and a subtle animated waveform sit beside the title and artist; expanding reveals 48dp playback controls. Use the existing Nothing-style high-contrast palette and keep both states compact on small displays.
+The optional player defaults to a 252dp-maximum capsule, centered below the status bar or display cutout with safe side margins. Its 40dp metadata row contains small artwork, one-line title and artist, and a restrained waveform. A translucent near-black surface, fine white border, and soft elevation keep the capsule legible without imitating any vendor's branded island.
+
+Tapping expands the capsule into a width-responsive card (up to 420dp) with artwork metadata, elapsed/duration labels, a thin progress track, and labeled 48dp previous/play-pause/next targets. Animate the card size and detail row together with a short damped spring; keep the progress timer active only while expanded. Maintain contrast and fit on small screens; playback remains on the existing Media3 player.
