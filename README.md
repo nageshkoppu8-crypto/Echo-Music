@@ -198,8 +198,7 @@ Visit the official repository to get started:
 
 ### Android Installation
 
-Download the latest pre-compiled APK from the [Releases Page](https://github.com/EchoMusicApp/Echo-Music/releases/latest).
-The [Floating Player preview APK](https://github.com/EchoMusicApp/Echo-Music/releases/download/floating-player-preview/Echo-Music-Universal-GMS.apk) is an installable debug build. Floating Player is optional in **Settings → Player** and requires Android's **Display over other apps** permission.
+Download the [Floating Player preview APK](https://github.com/nageshkoppu8-crypto/Echo-Music/releases/download/floating-player-preview/Echo-Music-Universal-GMS.apk). This debug-signed build installs separately and does not upgrade the stable app. Floating Player is optional in **Settings → Player** and requires Android's **Display over other apps** permission.
 
 <details>
 <summary><b>Building from Source</b></summary>
