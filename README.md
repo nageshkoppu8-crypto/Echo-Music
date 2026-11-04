@@ -198,7 +198,7 @@ Visit the official repository to get started:
 
 ### Android Installation
 
-Download the [Floating Player preview APK](https://github.com/nageshkoppu8-crypto/Echo-Music/releases/download/floating-player-states-preview/Echo-Music-Universal-GMS.apk). This debug-signed build installs separately and does not upgrade the stable app. The opt-in standard Android overlay supports a compact capsule, track-details pill, and playback card; it is not an OEM dynamic-island integration. Enable it in **Settings → Player** and grant Android's **Display over other apps** permission.
+Download the [Universal GMS Floating Player preview APK](https://github.com/nageshkoppu8-crypto/Echo-Music/releases/download/floating-player-cutout-preview/Echo-Music-Universal-GMS.apk). This v1.4.5 debug-signed build supports all four ABIs and installs separately as `echo.music.iad1tya.debug`; it does not upgrade the stable app. The opt-in standard Android overlay has two states: a cutout-aligned capsule and an expanded media card. Enable it in **Settings → Player** and grant Android's **Display over other apps** permission.
 
 <details>
 <summary><b>Building from Source</b></summary>
