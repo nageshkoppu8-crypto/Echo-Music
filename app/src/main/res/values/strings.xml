@@ -107,7 +107,6 @@
     <string name="floating_player_previous">Previous track</string>
     <string name="floating_player_next">Next track</string>
     <string name="floating_player_tap_to_expand">%1$s, %2$s. Tap to expand.</string>
-    <string name="floating_player_tap_to_open_controls">%1$s, %2$s. Tap to show playback controls.</string>
     <string name="floating_player_tap_to_collapse">%1$s, %2$s. Tap to collapse.</string>
     <string name="floating_player_elapsed">Elapsed time</string>
     <string name="floating_player_duration">Track duration</string>

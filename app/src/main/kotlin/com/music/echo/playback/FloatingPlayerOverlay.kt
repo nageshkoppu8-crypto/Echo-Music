@@ -8,6 +8,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -57,6 +58,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
   private var controlsRow: LinearLayout? = null
   private var metadataRow: LinearLayout? = null
   private var metadataColumn: LinearLayout? = null
+  private var cutoutSpacer: View? = null
   private var titleView: TextView? = null
   private var artistView: TextView? = null
   private var artworkView: ImageView? = null
@@ -72,6 +74,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
   private var statusInset = 0
   private var cutoutLeftInset = 0
   private var cutoutRightInset = 0
+  private var centeredCutoutBounds: Rect? = null
   private var horizontalOffset = 0
   private var verticalOffset = 0
   private var dragging = false
@@ -89,6 +92,13 @@ internal class FloatingPlayerOverlay(private val context: Context) {
   init {
     params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
     params.width = widthForState(PresentationState.CAPSULE)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      params.layoutInDisplayCutoutMode =
+        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+      params.layoutInDisplayCutoutMode =
+        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+    }
   }
 
   fun show(player: Player) {
@@ -143,7 +153,12 @@ internal class FloatingPlayerOverlay(private val context: Context) {
     val card =
       LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(14), dp(6), dp(14), dp(6))
+        setPadding(
+          dp(CAPSULE_HORIZONTAL_PADDING_DP),
+          dp(ROOT_VERTICAL_PADDING_DP),
+          dp(CAPSULE_HORIZONTAL_PADDING_DP),
+          dp(ROOT_VERTICAL_PADDING_DP)
+        )
         background =
           GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
@@ -179,7 +194,10 @@ internal class FloatingPlayerOverlay(private val context: Context) {
         clipToOutline = true
         setImageResource(R.drawable.ic_launcher_nobg)
       }
-    metadata.addView(artwork, LinearLayout.LayoutParams(dp(32), dp(32)))
+    metadata.addView(
+      artwork,
+      LinearLayout.LayoutParams(dp(CAPSULE_ARTWORK_DP), dp(CAPSULE_ARTWORK_DP))
+    )
 
     val textColumn =
       LinearLayout(context).apply {
@@ -187,6 +205,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(9), 0, dp(4), 0)
         alpha = 0f
+        visibility = View.GONE
       }
     val title =
       TextView(context).apply {
@@ -210,14 +229,20 @@ internal class FloatingPlayerOverlay(private val context: Context) {
       LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
     )
 
+    val spacer =
+      View(context).apply {
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+      }
+    metadata.addView(spacer, LinearLayout.LayoutParams(0, 1))
+
     val waveform = WaveformView(context, density)
     waveform.contentDescription = context.getString(R.string.floating_player_waveform)
     waveform.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
     metadata.addView(
       waveform,
-      LinearLayout.LayoutParams(dp(24), dp(26)).apply { marginStart = dp(4) }
+      LinearLayout.LayoutParams(dp(CAPSULE_WAVEFORM_DP), dp(CAPSULE_WAVEFORM_DP))
     )
-    card.addView(metadata, LinearLayout.LayoutParams(-1, dp(COLLAPSED_ROW_HEIGHT_DP)))
+    card.addView(metadata, LinearLayout.LayoutParams(-1, dp(CAPSULE_ROW_HEIGHT_DP)))
 
     val details =
       LinearLayout(context).apply {
@@ -371,12 +396,27 @@ internal class FloatingPlayerOverlay(private val context: Context) {
         cutoutTop = cutout?.safeInsetTop ?: 0
         cutoutLeftInset = cutout?.safeInsetLeft ?: 0
         cutoutRightInset = cutout?.safeInsetRight ?: 0
+        val screenCenter = context.resources.displayMetrics.widthPixels / 2
+        val centerTolerance =
+          max(dp(CUTOUT_CENTER_TOLERANCE_DP), context.resources.displayMetrics.widthPixels / 30)
+        centeredCutoutBounds =
+          cutout
+            ?.boundingRects
+            ?.asSequence()
+            ?.filter { it.width() > 0 && it.height() > 0 }
+            ?.minByOrNull { abs(it.centerX() - screenCenter) }
+            ?.takeIf { abs(it.centerX() - screenCenter) <= centerTolerance }
+            ?.let(::Rect)
       } else {
         cutoutTop = 0
         cutoutLeftInset = 0
         cutoutRightInset = 0
+        centeredCutoutBounds = null
       }
       statusInset = max(statusBarTop, cutoutTop)
+      expansionAnimator?.cancel()
+      expansionAnimator = null
+      applyMetadataLayout(presentationState)
       params.width = widthForState(presentationState)
       updateWindowPosition()
       insets
@@ -387,6 +427,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
     controlsRow = controls
     metadataRow = metadata
     metadataColumn = textColumn
+    cutoutSpacer = spacer
     titleView = title
     artistView = artist
     artworkView = artwork
@@ -481,11 +522,8 @@ internal class FloatingPlayerOverlay(private val context: Context) {
 
   private fun advancePresentationState() {
     val nextState =
-      when (presentationState) {
-        PresentationState.CAPSULE -> PresentationState.PILL
-        PresentationState.PILL -> PresentationState.CARD
-        PresentationState.CARD -> PresentationState.CAPSULE
-      }
+      if (presentationState == PresentationState.CAPSULE) PresentationState.CARD
+      else PresentationState.CAPSULE
     setPresentationState(nextState)
   }
 
@@ -506,12 +544,31 @@ internal class FloatingPlayerOverlay(private val context: Context) {
       if (targetState == PresentationState.CARD) expandedContentHeight() else 0
     val startWidth = params.width
     val targetWidth = widthForState(targetState)
+    val startY = params.y
+    val targetY = defaultWindowY(targetState) + verticalOffset
+    val startHeaderHeight = metadataRow?.layoutParams?.height ?: dp(CAPSULE_ROW_HEIGHT_DP)
+    val targetHeaderHeight =
+      if (targetState == PresentationState.CAPSULE) compactHeaderHeight()
+      else dp(EXPANDED_ROW_HEIGHT_DP)
+    val startArtworkSize = artworkView?.layoutParams?.width ?: dp(CAPSULE_ARTWORK_DP)
+    val targetArtworkSize =
+      dp(if (targetState == PresentationState.CAPSULE) CAPSULE_ARTWORK_DP else EXPANDED_ARTWORK_DP)
+    val startWaveformSize = waveformView?.layoutParams?.width ?: dp(CAPSULE_WAVEFORM_DP)
+    val targetWaveformSize =
+      dp(
+        if (targetState == PresentationState.CAPSULE) CAPSULE_WAVEFORM_DP
+        else EXPANDED_WAVEFORM_DP
+      )
+    val startSpacerWidth = cutoutSpacer?.layoutParams?.width ?: 0
+    val targetSpacerWidth =
+      if (targetState == PresentationState.CAPSULE) capsuleSpacerWidth() else 0
     val startTextAlpha = metadataColumn?.alpha ?: 0f
     val targetTextAlpha =
       if (targetState == PresentationState.CAPSULE) 0f else 1f
     if (targetState == PresentationState.CARD) {
       details.visibility = View.VISIBLE
       details.layoutParams = details.layoutParams.apply { height = currentHeight }
+      metadataColumn?.visibility = View.VISIBLE
     }
     metadataRow?.contentDescription = stateDescription(targetState)
     if (targetState == PresentationState.CARD) {
@@ -531,6 +588,40 @@ internal class FloatingPlayerOverlay(private val context: Context) {
             (startWidth + (targetWidth - startWidth) * fraction)
               .toInt()
               .coerceIn(dp(1), availableWidth())
+          metadataRow?.let { row ->
+            row.layoutParams =
+              row.layoutParams.apply {
+                height =
+                  (startHeaderHeight + (targetHeaderHeight - startHeaderHeight) * fraction)
+                    .toInt()
+              }
+          }
+          artworkView?.let { artwork ->
+            artwork.layoutParams =
+              artwork.layoutParams.apply {
+                val size =
+                  (startArtworkSize + (targetArtworkSize - startArtworkSize) * fraction).toInt()
+                width = size
+                height = size
+              }
+          }
+          waveformView?.let { waveform ->
+            waveform.layoutParams =
+              waveform.layoutParams.apply {
+                val size =
+                  (startWaveformSize + (targetWaveformSize - startWaveformSize) * fraction)
+                    .toInt()
+                width = size
+                height = size
+              }
+          }
+          cutoutSpacer?.let { spacer ->
+            spacer.layoutParams =
+              spacer.layoutParams.apply {
+                width =
+                  (startSpacerWidth + (targetSpacerWidth - startSpacerWidth) * fraction).toInt()
+              }
+          }
           details.layoutParams =
             details.layoutParams.apply {
               height =
@@ -545,7 +636,9 @@ internal class FloatingPlayerOverlay(private val context: Context) {
           details.translationY = dp(5) * (1f - linearFraction)
           metadataColumn?.alpha =
             startTextAlpha + (targetTextAlpha - startTextAlpha) * linearFraction
-          updateWindowPosition()
+          updateWindowPosition(
+            (startY + (targetY - startY) * linearFraction).toInt()
+          )
         }
         addListener(
           object : android.animation.AnimatorListenerAdapter() {
@@ -573,6 +666,8 @@ internal class FloatingPlayerOverlay(private val context: Context) {
                 details.translationY = 0f
                 updateProgress()
               }
+              applyMetadataLayout(targetState)
+              params.width = widthForState(targetState)
               metadataColumn?.alpha = targetTextAlpha
               expansionAnimator = null
               updateWindowPosition()
@@ -589,7 +684,6 @@ internal class FloatingPlayerOverlay(private val context: Context) {
     val description =
       when (state) {
         PresentationState.CAPSULE -> R.string.floating_player_tap_to_expand
-        PresentationState.PILL -> R.string.floating_player_tap_to_open_controls
         PresentationState.CARD -> R.string.floating_player_tap_to_collapse
       }
     return context.getString(description, title, artist)
@@ -598,9 +692,9 @@ internal class FloatingPlayerOverlay(private val context: Context) {
   private fun expandedContentHeight(): Int {
     val availableHeight =
       (context.resources.displayMetrics.heightPixels -
-        statusInset -
-        dp(SCREEN_SIDE_MARGIN_DP * 2) -
-        dp(COLLAPSED_ROW_HEIGHT_DP + ROOT_VERTICAL_PADDING_DP))
+        defaultWindowY(PresentationState.CARD) -
+        dp(8) -
+        dp(EXPANDED_ROW_HEIGHT_DP + ROOT_VERTICAL_PADDING_DP * 2))
         .coerceAtLeast(dp(MIN_EXPANDED_CONTENT_HEIGHT_DP))
     return min(dp(EXPANDED_CONTENT_HEIGHT_DP), availableHeight)
   }
@@ -609,12 +703,91 @@ internal class FloatingPlayerOverlay(private val context: Context) {
     val maxWidth = availableWidth()
     val width =
       when (state) {
-        PresentationState.CAPSULE -> CAPSULE_WIDTH_DP
-        PresentationState.PILL -> PILL_WIDTH_DP
-        PresentationState.CARD -> EXPANDED_MAX_WIDTH_DP
+        PresentationState.CAPSULE ->
+          max(
+            dp(CAPSULE_MIN_WIDTH_DP),
+            (centeredCutoutBounds?.width() ?: 0) +
+              dp(
+                CAPSULE_HORIZONTAL_PADDING_DP * 2 +
+                  CAPSULE_ARTWORK_DP +
+                  CAPSULE_WAVEFORM_DP +
+                  CUTOUT_HORIZONTAL_CLEARANCE_DP
+              )
+          )
+        PresentationState.CARD -> dp(EXPANDED_MAX_WIDTH_DP)
       }
-    return min(dp(width), maxWidth)
+    return min(width, maxWidth)
       .coerceAtLeast(dp(1))
+  }
+
+  private fun compactHeaderHeight(): Int =
+    max(
+      dp(CAPSULE_ROW_HEIGHT_DP),
+      (centeredCutoutBounds?.height() ?: 0) + dp(CUTOUT_VERTICAL_CLEARANCE_DP)
+    )
+
+  private fun capsuleSpacerWidth(): Int =
+    (widthForState(PresentationState.CAPSULE) -
+      dp(
+        CAPSULE_HORIZONTAL_PADDING_DP * 2 +
+          CAPSULE_ARTWORK_DP +
+          CAPSULE_WAVEFORM_DP
+      ))
+      .coerceAtLeast(0)
+
+  private fun defaultWindowY(state: PresentationState): Int =
+    if (state == PresentationState.CAPSULE) {
+      centeredCutoutBounds?.let { bounds ->
+        (bounds.centerY() - (compactHeaderHeight() + dp(ROOT_VERTICAL_PADDING_DP * 2)) / 2)
+          .coerceAtLeast(0)
+      } ?: (statusInset + dp(4))
+    } else {
+      statusInset + dp(4)
+    }
+
+  private fun applyMetadataLayout(state: PresentationState) {
+    val compact = state == PresentationState.CAPSULE
+    metadataRow?.let { row ->
+      row.layoutParams =
+        row.layoutParams.apply {
+          height = if (compact) compactHeaderHeight() else dp(EXPANDED_ROW_HEIGHT_DP)
+        }
+      row.contentDescription = stateDescription(state)
+    }
+    artworkView?.let { artwork ->
+      val size = dp(if (compact) CAPSULE_ARTWORK_DP else EXPANDED_ARTWORK_DP)
+      artwork.layoutParams =
+        artwork.layoutParams.apply {
+          width = size
+          height = size
+        }
+    }
+    waveformView?.let { waveform ->
+      val size = dp(if (compact) CAPSULE_WAVEFORM_DP else EXPANDED_WAVEFORM_DP)
+      waveform.layoutParams =
+        waveform.layoutParams.apply {
+          width = size
+          height = size
+        }
+    }
+    cutoutSpacer?.let { spacer ->
+      spacer.layoutParams =
+        spacer.layoutParams.apply {
+          width = if (compact) capsuleSpacerWidth() else 0
+        }
+    }
+    metadataColumn?.let { text ->
+      text.visibility = if (compact) View.GONE else View.VISIBLE
+      text.alpha = if (compact) 0f else 1f
+    }
+    expandedContent?.let { details ->
+      details.visibility = if (compact) View.GONE else View.VISIBLE
+      details.layoutParams =
+        details.layoutParams.apply {
+          height = if (compact) 0 else LinearLayout.LayoutParams.WRAP_CONTENT
+        }
+      details.alpha = if (compact) 0f else 1f
+    }
   }
 
   private fun availableWidth(): Int =
@@ -624,21 +797,21 @@ internal class FloatingPlayerOverlay(private val context: Context) {
       dp(SCREEN_SIDE_MARGIN_DP * 2))
       .coerceAtLeast(dp(1))
 
-  private fun updateWindowPosition() {
+  private fun updateWindowPosition(yOverride: Int? = null) {
     val screenWidth = context.resources.displayMetrics.widthPixels
     val screenHeight = context.resources.displayMetrics.heightPixels
-    params.x = horizontalOffset
-    params.y = (statusInset + dp(4) + verticalOffset).coerceAtLeast(statusInset + dp(4))
-    if (!attached) return
-
+    val baseY = defaultWindowY(presentationState)
+    val maxY =
+      (screenHeight - dp(8) - (container?.height ?: compactHeaderHeight() + dp(8)))
+        .coerceAtLeast(0)
+    verticalOffset = verticalOffset.coerceIn(0, (maxY - baseY).coerceAtLeast(0))
     val maxHorizontalOffset =
       ((screenWidth - params.width) / 2 - max(cutoutLeftInset, cutoutRightInset)).coerceAtLeast(0)
     horizontalOffset = horizontalOffset.coerceIn(-maxHorizontalOffset, maxHorizontalOffset)
-    val maxVerticalOffset =
-      (screenHeight - statusInset - dp(8) - (container?.height ?: dp(64))).coerceAtLeast(0)
-    verticalOffset = verticalOffset.coerceIn(0, maxVerticalOffset)
     params.x = horizontalOffset
-    params.y = (statusInset + dp(4) + verticalOffset).coerceAtLeast(statusInset + dp(4))
+    params.y = (yOverride ?: (baseY + verticalOffset)).coerceIn(0, maxY)
+    if (!attached) return
+
     try {
       container?.let { windowManager.updateViewLayout(it, params) }
     } catch (exception: IllegalArgumentException) {
@@ -663,6 +836,7 @@ internal class FloatingPlayerOverlay(private val context: Context) {
     artistView = null
     artworkView = null
     waveformView = null
+    cutoutSpacer = null
     elapsedView = null
     durationView = null
     progressView = null
@@ -671,7 +845,6 @@ internal class FloatingPlayerOverlay(private val context: Context) {
 
   private enum class PresentationState {
     CAPSULE,
-    PILL,
     CARD
   }
 
@@ -761,15 +934,23 @@ internal class FloatingPlayerOverlay(private val context: Context) {
   }
 
   private companion object {
-    const val CAPSULE_WIDTH_DP = 96
-    const val PILL_WIDTH_DP = 284
-    const val COLLAPSED_ROW_HEIGHT_DP = 40
+    const val CAPSULE_MIN_WIDTH_DP = 64
+    const val CAPSULE_HORIZONTAL_PADDING_DP = 6
+    const val CAPSULE_ARTWORK_DP = 18
+    const val CAPSULE_WAVEFORM_DP = 18
+    const val CAPSULE_ROW_HEIGHT_DP = 28
+    const val CUTOUT_CENTER_TOLERANCE_DP = 16
+    const val CUTOUT_HORIZONTAL_CLEARANCE_DP = 8
+    const val CUTOUT_VERTICAL_CLEARANCE_DP = 6
+    const val EXPANDED_ROW_HEIGHT_DP = 40
+    const val EXPANDED_ARTWORK_DP = 32
+    const val EXPANDED_WAVEFORM_DP = 24
     const val EXPANDED_MAX_WIDTH_DP = 420
     const val EXPANDED_CONTENT_HEIGHT_DP = 77
     const val MIN_EXPANDED_CONTENT_HEIGHT_DP = 75
     const val EXPANDED_CONTROLS_HEIGHT_DP = 48
     const val SCREEN_SIDE_MARGIN_DP = 16
-    const val ROOT_VERTICAL_PADDING_DP = 12
+    const val ROOT_VERTICAL_PADDING_DP = 4
     const val EXPANSION_DURATION_MS = 360L
     const val PROGRESS_UPDATE_INTERVAL_MS = 500L
 
